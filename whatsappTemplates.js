@@ -1,6 +1,8 @@
 const axios = require("axios");
 const fs = require("fs");
+const mysql = require("mysql2/promise");
 
+// Plantillas
 const templates = {
   SALUDO_INICIAL_LOTUS: "saludo_inicial_lotus",
   CONSULTAR_PEDIDOS_LOTUS: "consultar_pedidos_lotus",
@@ -9,57 +11,46 @@ const templates = {
   SOPORTE_TECNICO_LOTUS: "soporte_tecnico_lotus",
   TRANSFERENCIA_ASESOR_LOTUS: "transferencia_asesor_lotus",
   MENSAJE_ERROR_LOTUS: "mensaje_error",
-  CONFIRMACION_REEMBOLSO_LOTUS: "confirmacion_reembolso_lotus"
+  CONFIRMACION_REEMBOLSO_LOTUS: "confirmacion_reembolso_lotus",
 };
 
-// Mapeo de variables esperadas por cada plantilla
+// Número de variables que espera cada plantilla
 const variablesPorPlantilla = {
-  saludo_inicial: ["nombre_cliente"],
-  consultar_pedidos: [
-    "nombre_cliente",
-    "codigo_pedido1",
-    "estado_pedido1",
-    "codigo_pedido2",
-    "estado_pedido2"
-  ],
-  detalle_pedido: [
-    "codigo_pedido",
-    "fecha_pedido",
-    "estado_pedido",
-    "monto_total"
-  ],
-  solicitud_reembolso: ["nombre_cliente"],
-  soporte_tecnico: ["nombre_cliente"],
-  transferencia_asesor: [],
+  saludo_inicial_lotus: ["nombre_cliente"],
+  consultar_pedidos_lotus: ["nombre_cliente", "codigo_pedido1", "estado_pedido1", "codigo_pedido2", "estado_pedido2"],
+  detalle_pedido_lotus: ["codigo_pedido","fecha_pedido","estado_pedido","monto_total"],
+  solicitud_reembolso_lotus: ["nombre_cliente"],
+  soporte_tecnico_lotus: ["nombre_cliente"],
+  transferencia_asesor_lotus: [],
   mensaje_error: ["nombre_cliente"],
-  confirmacion_reembolso: ["codigo_pedido"]
+  confirmacion_reembolso_lotus: ["codigo_pedido"]
 };
 
-// Utilidad para limpiar texto y asegurar longitud
-function sanitize(text) {
-  const cleaned = text.replace(/[\n\t]+/g, " ").replace(/\s{2,}/g, " ").trim();
-  return cleaned.slice(0, 1024);
-}
-
-// Token de acceso generado en la consola de Meta
+// Token y phoneNumberId de tu WhatsApp Business
 const accessToken = "EAAKuMVxp1FYBPOG663hUklVI0cgyAZA8oiJ9CBqE7MoXnm6nAvKZA4qjKkCBcezZCLhfQEPD8r22ZBTScP6gI540TIu52ZCGSOILZB53HQWI5fUdc31xiUfHO9ZAB5wEL1hxZBMww0GOWwzHBAZA9A5IlxyZASkCn0tROJkTZCZCzNrBcZADEx0t4hmwadVZCTMnQPhU1cQwZDZD";
 const phoneNumberId = "653490954522539";
 
-// Función para limpiar y validar el número
+// Sanitizar texto
+function sanitize(text) {
+  return String(text || "")
+    .replace(/[\n\t]+/g, " ")
+    .replace(/\s{2,}/g, " ")
+    .trim()
+    .slice(0, 1024);
+}
+
+// Validar número
 function procesarNumero(to) {
   if (!to) throw new Error("Número de destinatario no válido");
   return to.startsWith("521") ? to.replace(/^521/, "52") : to;
 }
 
-// Función genérica para construir y enviar payloads
+// Enviar payload
 async function enviarPayload(to, templateName, components = []) {
   const url = `https://graph.facebook.com/v23.0/${phoneNumberId}/messages`;
-
-  to = procesarNumero(to);
-
   const payload = {
     messaging_product: "whatsapp",
-    to,
+    to: procesarNumero(to),
     type: "template",
     template: {
       name: templateName,
@@ -68,84 +59,111 @@ async function enviarPayload(to, templateName, components = []) {
     },
   };
 
-  const headers = {
-    Authorization: `Bearer ${accessToken}`,
-    "Content-Type": "application/json",
-  };
-
   try {
-    const response = await axios.post(url, payload, { headers });
-    logExitoso(payload, response.data);
-  } catch (error) {
-    logError(payload, error);
+    const response = await axios.post(url, payload, {
+      headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+    });
+    console.log("Plantilla enviada:", response.data);
+  } catch (err) {
+    console.error("Error enviando plantilla:", err.response?.data || err.message);
   }
 }
 
-// Funciones específicas
+// Enviar plantilla
 async function enviarPlantillaWhatsApp(to, templateName, variables = []) {
   const components = variables.length
     ? [
         {
           type: "body",
-          parameters: variables.map(v => ({
-            type: "text",
-            text: sanitize(String(v))
-          }))
-        }
+          parameters: variables.map(v => ({ type: "text", text: sanitize(v) })),
+        },
       ]
     : [];
   await enviarPayload(to, templateName, components);
 }
 
-async function enviarPlantillaErrorGenerico(to, errorMessage) {
-  const components = [
-    {
-      type: "body",
-      parameters: [{ type: "text", text: errorMessage }],
-    },
-  ];
-  await enviarPayload(to, templates.ERROR_GENERICO, components);
-}
-
+// Enviar texto simple
 async function enviarMensajeTexto(to, text) {
   const url = `https://graph.facebook.com/v23.0/${phoneNumberId}/messages`;
   const payload = {
     messaging_product: "whatsapp",
     to: procesarNumero(to),
     type: "text",
-    text: { body: text },
-  };
-
-  const headers = {
-    Authorization: `Bearer ${accessToken}`,
-    "Content-Type": "application/json",
+    text: { body: sanitize(text) },
   };
 
   try {
-    const response = await axios.post(url, payload, { headers });
-    logExitoso(payload, response.data);
-  } catch (error) {
-    logError(payload, error);
+    const response = await axios.post(url, payload, {
+      headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+    });
+    console.log("Mensaje de texto enviado:", response.data);
+  } catch (err) {
+    console.error("Error enviando mensaje:", err.response?.data || err.message);
   }
 }
 
-// Funciones auxiliares para logging
-function logExitoso(payload, responseData) {
-  const logMessage = `${new Date().toISOString()} - Enviado: ${JSON.stringify(payload)}\nRespuesta: ${JSON.stringify(responseData)}\n`;
-  fs.appendFileSync("template_log.txt", logMessage);
-  console.log("Plantilla enviada exitosamente:", responseData);
+// Determinar plantilla según mensaje
+function determinarPlantilla(mensaje) {
+  if (!mensaje || typeof mensaje !== "string") return templates.MENSAJE_ERROR_LOTUS;
+  const texto = mensaje.toLowerCase();
+  if (texto.includes("hola")) return templates.SALUDO_INICIAL_LOTUS;
+  if (texto.includes("mis pedidos") || texto.includes("consultar")) return templates.CONSULTAR_PEDIDOS_LOTUS;
+  if (texto.includes("detalle")) return templates.DETALLE_PEDIDO_LOTUS;
+  if (texto.includes("reembolso")) return templates.SOLICITUD_REEMBOLSO_LOTUS;
+  if (texto.includes("soporte")) return templates.SOPORTE_TECNICO_LOTUS;
+  if (texto.includes("asesor")) return templates.TRANSFERENCIA_ASESOR_LOTUS;
+  return templates.MENSAJE_ERROR_LOTUS;
 }
 
-function logError(payload, error) {
-  const errorData = error.response?.data || error.message;
-  const logMessage = `${new Date().toISOString()} - Error enviando: ${JSON.stringify(payload)}\nError: ${JSON.stringify(errorData)}\n`;
-  fs.appendFileSync("template_log.txt", logMessage);
-  console.error("Error enviando plantilla:", errorData);
+// Extraer variables desde la base de datos
+async function extraerVariables(templateName, filtroUsuario) {
+  const connection = await mysql.createConnection({
+    host: "localhost",
+    user: "root",
+    password: "",
+    database: "chatbot",
+  });
+
+  const variableNames = variablesPorPlantilla[templateName] || [];
+  const valores = [];
+
+  for (let i = 0; i < variableNames.length; i++) {
+    const varName = variableNames[i];
+    let valor = "";
+
+    // Mapeo de variables a campos reales
+    if (varName === "nombre_cliente") {
+      const [rows] = await connection.execute(
+        "SELECT nombre FROM usuarios WHERE id = ?",
+        [filtroUsuario.id_usuario]
+      );
+      valor = rows[0]?.nombre || "";
+    } else if (varName.startsWith("codigo_pedido") || varName.startsWith("estado_pedido")) {
+      valor = varName + "_demo"; // ejemplo, reemplazar según lógica real de pedidos
+    } else if (varName === "fecha_pedido") {
+      valor = "2025-08-13";
+    } else if (varName === "monto_total") {
+      valor = "$1000";
+    }
+
+    valores.push(valor);
+  }
+
+  await connection.end();
+  return valores;
+}
+
+// Procesar mensaje con variables desde DB
+async function procesarMensaje(to, mensaje, filtroUsuario = { id_usuario: 1 }) {
+  if (!to) throw new Error("Número vacío");
+  const plantilla = determinarPlantilla(mensaje);
+  const variables = await extraerVariables(plantilla, filtroUsuario);
+  await enviarPlantillaWhatsApp(to, plantilla, variables);
 }
 
 module.exports = {
   templates,
   enviarPlantillaWhatsApp,
-  enviarPlantillaErrorGenerico,
   enviarMensajeTexto,
+  procesarMensaje,
 };

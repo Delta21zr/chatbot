@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="UTF-8"><title>Chatbot simple</title></head>
+<body>
+  <h3>Chatbot</h3>
+  <div id="chat" style="border:1px solid #ccc; padding:10px; height:300px; overflow-y:auto;"></div>
+  <input id="mensaje" type="text" placeholder="Escribe tu mensaje" style="width:80%">
+  <button onclick="enviarMensaje()">Enviar</button>
+
+  <script>
+    async function enviarMensaje() {
+      const input = document.getElementById('mensaje');
+      const chat = document.getElementById('chat');
+      const mensaje = input.value.trim();
+      if (!mensaje) return;
+
+      chat.innerHTML += `<div><b>Tú:</b> ${mensaje}</div>`;
+      input.value = '';
+
+      const resp = await fetch('chatbot.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: `mensaje=${encodeURIComponent(mensaje)}`
+      });
+      const data = await resp.json();
+
+      let respuestaTexto = '';
+      if (typeof data === 'string') {
+        respuestaTexto = data;
+      } else if (data.mensaje) {
+        respuestaTexto = data.mensaje;
+      } else {
+        respuestaTexto = JSON.stringify(data);
+      }
+      chat.innerHTML += `<div><b>Bot:</b> ${respuestaTexto}</div>`;
+      chat.scrollTop = chat.scrollHeight;
+    }
+  </script>
+</body>
+</html>
