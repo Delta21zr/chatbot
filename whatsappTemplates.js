@@ -10,20 +10,8 @@ const templates = {
   SOLICITUD_REEMBOLSO_LOTUS: "solicitud_reembolso_lotus",
   SOPORTE_TECNICO_LOTUS: "soporte_tecnico_lotus",
   TRANSFERENCIA_ASESOR_LOTUS: "transferencia_asesor_lotus",
-  MENSAJE_ERROR_LOTUS: "mensaje_error",
+  MENSAJE_ERROR_LOTUS: "mensaje_error_lotus",
   CONFIRMACION_REEMBOLSO_LOTUS: "confirmacion_reembolso_lotus",
-};
-
-// Número de variables que espera cada plantilla
-const variablesPorPlantilla = {
-  saludo_inicial_lotus: ["nombre_cliente"],
-  consultar_pedidos_lotus: ["nombre_cliente", "codigo_pedido1", "estado_pedido1", "codigo_pedido2", "estado_pedido2"],
-  detalle_pedido_lotus: ["codigo_pedido","fecha_pedido","estado_pedido","monto_total"],
-  solicitud_reembolso_lotus: ["nombre_cliente"],
-  soporte_tecnico_lotus: ["nombre_cliente"],
-  transferencia_asesor_lotus: [],
-  mensaje_error: ["nombre_cliente"],
-  confirmacion_reembolso_lotus: ["codigo_pedido"]
 };
 
 // Token y phoneNumberId de tu WhatsApp Business
@@ -106,16 +94,16 @@ async function enviarMensajeTexto(to, text) {
 function determinarPlantilla(mensaje) {
   if (!mensaje || typeof mensaje !== "string") return templates.MENSAJE_ERROR_LOTUS;
   const texto = mensaje.toLowerCase();
-  if (texto.includes("hola")) return templates.SALUDO_INICIAL_LOTUS;
-  if (texto.includes("mis pedidos") || texto.includes("consultar")) return templates.CONSULTAR_PEDIDOS_LOTUS;
+  if (["hola", "buenos días", "buenas tardes", "hey", "qué tal"].some(p => texto.includes(p))) return templates.SALUDO_INICIAL_LOTUS;
+  if (["pedido", "orden", "compra"].some(p => texto.includes(p))) return templates.CONSULTAR_PEDIDOS_LOTUS;
   if (texto.includes("detalle")) return templates.DETALLE_PEDIDO_LOTUS;
-  if (texto.includes("reembolso")) return templates.SOLICITUD_REEMBOLSO_LOTUS;
-  if (texto.includes("soporte")) return templates.SOPORTE_TECNICO_LOTUS;
+  if (["reembolso", "devolución"].some(p => texto.includes(p))) return templates.SOLICITUD_REEMBOLSO_LOTUS;
+  if (["soporte", "ayuda", "problema tecnico", "no funciona"].some(p => texto.includes(p))) return templates.SOPORTE_TECNICO_LOTUS;
   if (texto.includes("asesor")) return templates.TRANSFERENCIA_ASESOR_LOTUS;
   return templates.MENSAJE_ERROR_LOTUS;
 }
 
-// Extraer variables desde la base de datos
+// Extraer variables desde la base de datos según plantilla
 async function extraerVariables(templateName, filtroUsuario) {
   const connection = await mysql.createConnection({
     host: "localhost",
@@ -124,29 +112,58 @@ async function extraerVariables(templateName, filtroUsuario) {
     database: "chatbot",
   });
 
-  const variableNames = variablesPorPlantilla[templateName] || [];
-  const valores = [];
+  let valores = [];
 
-  for (let i = 0; i < variableNames.length; i++) {
-    const varName = variableNames[i];
-    let valor = "";
-
-    // Mapeo de variables a campos reales
-    if (varName === "nombre_cliente") {
-      const [rows] = await connection.execute(
+  switch(templateName) {
+    case "saludo_inicial_lotus":
+    case "solicitud_reembolso_lotus":
+    case "soporte_tecnico_lotus":
+    case "mensaje_error":
+      const [userRows] = await connection.execute(
         "SELECT nombre FROM usuarios WHERE id = ?",
         [filtroUsuario.id_usuario]
       );
-      valor = rows[0]?.nombre || "";
-    } else if (varName.startsWith("codigo_pedido") || varName.startsWith("estado_pedido")) {
-      valor = varName + "_demo"; // ejemplo, reemplazar según lógica real de pedidos
-    } else if (varName === "fecha_pedido") {
-      valor = "2025-08-13";
-    } else if (varName === "monto_total") {
-      valor = "$1000";
-    }
+      valores = [userRows[0]?.nombre || ""];
+      break;
 
-    valores.push(valor);
+    case "consultar_pedidos_lotus":
+      const [user] = await connection.execute(
+        "SELECT nombre FROM usuarios WHERE id = ?",
+        [filtroUsuario.id_usuario]
+      );
+      const [pedidoRows] = await connection.execute(
+        "SELECT codigo_pedido, estado FROM pedidos WHERE usuario_id = ? ORDER BY fecha DESC LIMIT 2",
+        [filtroUsuario.id_usuario]
+      );
+      valores = [
+        user[0]?.nombre || "",
+        pedidoRows[0]?.codigo_pedido || "",
+        pedidoRows[0]?.estado || "",
+        pedidoRows[1]?.codigo_pedido || "",
+        pedidoRows[1]?.estado || "",
+      ];
+      break;
+
+    case "detalle_pedido_lotus":
+      const [detalleRows] = await connection.execute(
+        "SELECT codigo_pedido, fecha, estado, total FROM pedidos WHERE codigo_pedido = ?",
+        [filtroUsuario.codigo_pedido]
+      );
+      valores = [
+        detalleRows[0]?.codigo_pedido || "",
+        detalleRows[0]?.fecha || "",
+        detalleRows[0]?.estado || "",
+        detalleRows[0]?.total || "",
+      ];
+      break;
+
+    case "confirmacion_reembolso_lotus":
+      valores = [filtroUsuario.codigo_pedido || ""];
+      break;
+
+    case "transferencia_asesor_lotus":
+      valores = [];
+      break;
   }
 
   await connection.end();
