@@ -1,5 +1,4 @@
 const axios = require("axios");
-const fs = require("fs");
 const mysql = require("mysql2/promise");
 
 // Plantillas
@@ -90,16 +89,26 @@ async function enviarMensajeTexto(to, text) {
   }
 }
 
-// Determinar plantilla según mensaje
+// Determinar plantilla según mensaje recibido
 function determinarPlantilla(mensaje) {
   if (!mensaje || typeof mensaje !== "string") return templates.MENSAJE_ERROR_LOTUS;
+
   const texto = mensaje.toLowerCase();
-  if (["hola", "buenos días", "buenas tardes", "hey", "qué tal"].some(p => texto.includes(p))) return templates.SALUDO_INICIAL_LOTUS;
-  if (["pedido", "orden", "compra"].some(p => texto.includes(p))) return templates.CONSULTAR_PEDIDOS_LOTUS;
-  if (texto.includes("detalle")) return templates.DETALLE_PEDIDO_LOTUS;
-  if (["reembolso", "devolución"].some(p => texto.includes(p))) return templates.SOLICITUD_REEMBOLSO_LOTUS;
-  if (["soporte", "ayuda", "problema tecnico", "no funciona"].some(p => texto.includes(p))) return templates.SOPORTE_TECNICO_LOTUS;
-  if (texto.includes("asesor")) return templates.TRANSFERENCIA_ASESOR_LOTUS;
+
+  const saludoKeywords = ["hola", "buenos días", "buenas tardes", "hey", "qué tal"];
+  const pedidoKeywords = ["pedido", "orden", "compra"];
+  const detalleKeywords = ["detalle"];
+  const reembolsoKeywords = ["reembolso", "devolución"];
+  const soporteKeywords = ["soporte", "ayuda", "problema tecnico", "no funciona"];
+  const asesorKeywords = ["asesor", "hablar con un asesor", "quiero hablar con un asesor", "contactar asesor", "soporte humano"];
+
+  if (saludoKeywords.some(p => texto.includes(p))) return templates.SALUDO_INICIAL_LOTUS;
+  if (pedidoKeywords.some(p => texto.includes(p))) return templates.CONSULTAR_PEDIDOS_LOTUS;
+  if (detalleKeywords.some(p => texto.includes(p))) return templates.DETALLE_PEDIDO_LOTUS;
+  if (reembolsoKeywords.some(p => texto.includes(p))) return templates.SOLICITUD_REEMBOLSO_LOTUS;
+  if (soporteKeywords.some(p => texto.includes(p))) return templates.SOPORTE_TECNICO_LOTUS;
+  if (asesorKeywords.some(p => texto.includes(p))) return templates.TRANSFERENCIA_ASESOR_LOTUS;
+
   return templates.MENSAJE_ERROR_LOTUS;
 }
 
@@ -118,7 +127,7 @@ async function extraerVariables(templateName, filtroUsuario) {
     case "saludo_inicial_lotus":
     case "solicitud_reembolso_lotus":
     case "soporte_tecnico_lotus":
-    case "mensaje_error":
+    case "mensaje_error_lotus":
       const [userRows] = await connection.execute(
         "SELECT nombre FROM usuarios WHERE id = ?",
         [filtroUsuario.id_usuario]
@@ -145,16 +154,19 @@ async function extraerVariables(templateName, filtroUsuario) {
       break;
 
     case "detalle_pedido_lotus":
+      if (!filtroUsuario.codigo_pedido) break;
       const [detalleRows] = await connection.execute(
         "SELECT codigo_pedido, fecha, estado, total FROM pedidos WHERE codigo_pedido = ?",
         [filtroUsuario.codigo_pedido]
       );
-      valores = [
-        detalleRows[0]?.codigo_pedido || "",
-        detalleRows[0]?.fecha || "",
-        detalleRows[0]?.estado || "",
-        detalleRows[0]?.total || "",
-      ];
+      if (detalleRows.length) {
+        valores = [
+          detalleRows[0]?.codigo_pedido || "",
+          detalleRows[0]?.fecha || "",
+          detalleRows[0]?.estado || "",
+          detalleRows[0]?.total || "",
+        ];
+      }
       break;
 
     case "confirmacion_reembolso_lotus":
@@ -171,8 +183,20 @@ async function extraerVariables(templateName, filtroUsuario) {
 }
 
 // Procesar mensaje con variables desde DB
-async function procesarMensaje(to, mensaje, filtroUsuario = { id_usuario: 1 }) {
+async function procesarMensaje(to, mensaje, filtroUsuario = { id_usuario: 1, codigo_pedido: null }) {
   if (!to) throw new Error("Número vacío");
+
+  // Detectar si el mensaje es un código de pedido
+  const esCodigoPedido = /^[A-Z]{3}\d{3,}$/i.test(mensaje.trim());
+  if (esCodigoPedido) {
+    filtroUsuario.codigo_pedido = mensaje.trim().toUpperCase();
+    const plantilla = templates.DETALLE_PEDIDO_LOTUS;
+    const variables = await extraerVariables(plantilla, filtroUsuario);
+    await enviarPlantillaWhatsApp(to, plantilla, variables);
+    return;
+  }
+
+  // Detectar plantilla normal
   const plantilla = determinarPlantilla(mensaje);
   const variables = await extraerVariables(plantilla, filtroUsuario);
   await enviarPlantillaWhatsApp(to, plantilla, variables);
