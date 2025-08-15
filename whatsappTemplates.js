@@ -182,26 +182,61 @@ async function extraerVariables(templateName, filtroUsuario) {
   return valores;
 }
 
-// Procesar mensaje con variables desde DB
+// ... (todo tu código anterior sin cambios hasta extraerVariables)
+
+// Procesar mensaje con variables desde DB (nueva versión con manejo de estado)
+const estadosUsuarios = {}; // estado temporal por usuario en memoria
+
 async function procesarMensaje(to, mensaje, filtroUsuario = { id_usuario: 1, codigo_pedido: null }) {
   if (!to) throw new Error("Número vacío");
 
-  // Detectar si el mensaje es un código de pedido
-  const esCodigoPedido = /^[A-Z]{3}\d{3,}$/i.test(mensaje.trim());
-  if (esCodigoPedido) {
-    filtroUsuario.codigo_pedido = mensaje.trim().toUpperCase();
-    const plantilla = templates.DETALLE_PEDIDO_LOTUS;
+  const usuarioId = filtroUsuario.id_usuario;
+  estadosUsuarios[usuarioId] = estadosUsuarios[usuarioId] || {};
+
+  const texto = mensaje.trim();
+
+  // --- 1. Si el usuario está en flujo de reembolso y envía código de pedido ---
+  if (estadosUsuarios[usuarioId].esperandoReembolso && /^[A-Z]{3}\d{3,}$/i.test(texto)) {
+    filtroUsuario.codigo_pedido = texto.toUpperCase();
+
+    // Plantilla de confirmación de reembolso
+    const plantilla = "confirmacion_reembolso_lotus";
+    const variables = await extraerVariables(plantilla, filtroUsuario);
+    await enviarPlantillaWhatsApp(to, plantilla, variables);
+
+    // Limpiar estado
+    estadosUsuarios[usuarioId].esperandoReembolso = false;
+    return;
+  }
+
+  // --- 2. Si el mensaje contiene "reembolso" y no estaba esperando código ---
+  if (texto.toLowerCase().includes("reembolso")) {
+    estadosUsuarios[usuarioId].esperandoReembolso = true;
+
+    // Plantilla solicitando código de pedido
+    const plantilla = "solicitud_reembolso_lotus";
     const variables = await extraerVariables(plantilla, filtroUsuario);
     await enviarPlantillaWhatsApp(to, plantilla, variables);
     return;
   }
 
-  // Detectar plantilla normal
-  const plantilla = determinarPlantilla(mensaje);
+  // --- 3. Si el mensaje es un código de pedido normal ---
+  if (/^[A-Z]{3}\d{3,}$/i.test(texto)) {
+    filtroUsuario.codigo_pedido = texto.toUpperCase();
+
+    const plantilla = "detalle_pedido_lotus";
+    const variables = await extraerVariables(plantilla, filtroUsuario);
+    await enviarPlantillaWhatsApp(to, plantilla, variables);
+    return;
+  }
+
+  // --- 4. Plantillas normales según keywords ---
+  const plantilla = determinarPlantilla(texto);
   const variables = await extraerVariables(plantilla, filtroUsuario);
   await enviarPlantillaWhatsApp(to, plantilla, variables);
 }
 
+// --- Exportar ---
 module.exports = {
   templates,
   enviarPlantillaWhatsApp,
