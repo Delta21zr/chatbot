@@ -11,13 +11,14 @@ const templates = {
   TRANSFERENCIA_ASESOR_LOTUS: "transferencia_asesor_lotus",
   MENSAJE_ERROR_LOTUS: "mensaje_error_lotus",
   CONFIRMACION_REEMBOLSO_LOTUS: "confirmacion_reembolso_lotus",
+  INSTRUCCIONES_BLACK_LOTUS: "instrucciones_black_lotus",
 };
 
 // Token y phoneNumberId de tu WhatsApp Business
 const accessToken = "EAAKuMVxp1FYBPOG663hUklVI0cgyAZA8oiJ9CBqE7MoXnm6nAvKZA4qjKkCBcezZCLhfQEPD8r22ZBTScP6gI540TIu52ZCGSOILZB53HQWI5fUdc31xiUfHO9ZAB5wEL1hxZBMww0GOWwzHBAZA9A5IlxyZASkCn0tROJkTZCZCzNrBcZADEx0t4hmwadVZCTMnQPhU1cQwZDZD";
 const phoneNumberId = "653490954522539";
 
-// Sanitizar texto
+// --- Sanitizar texto ---
 function sanitize(text) {
   return String(text || "")
     .replace(/[\n\t]+/g, " ")
@@ -26,13 +27,13 @@ function sanitize(text) {
     .slice(0, 1024);
 }
 
-// Validar número
+// --- Validar número ---
 function procesarNumero(to) {
   if (!to) throw new Error("Número de destinatario no válido");
   return to.startsWith("521") ? to.replace(/^521/, "52") : to;
 }
 
-// Enviar payload
+// --- Enviar payload ---
 async function enviarPayload(to, templateName, components = []) {
   const url = `https://graph.facebook.com/v23.0/${phoneNumberId}/messages`;
   const payload = {
@@ -56,20 +57,36 @@ async function enviarPayload(to, templateName, components = []) {
   }
 }
 
-// Enviar plantilla
-async function enviarPlantillaWhatsApp(to, templateName, variables = []) {
-  const components = variables.length
-    ? [
+// --- Enviar plantilla con variables y opcional imagen ---
+async function enviarPlantillaWhatsApp(to, templateName, variables = [], imageUrl = null) {
+  const components = [];
+
+  // Si hay variables de texto, se agregan al body
+  if (variables.length) {
+    components.push({
+      type: "body",
+      parameters: variables.map(v => ({ type: "text", text: sanitize(v) })),
+    });
+  }
+
+  // Si hay imagen, agregar header de tipo IMAGE
+  if (imageUrl) {
+    components.unshift({
+      type: "header",
+      parameters: [
         {
-          type: "body",
-          parameters: variables.map(v => ({ type: "text", text: sanitize(v) })),
+          type: "image",
+          image: { link: imageUrl },
         },
-      ]
-    : [];
+      ],
+    });
+  }
+
   await enviarPayload(to, templateName, components);
 }
 
-// Enviar texto simple
+
+// --- Enviar texto simple ---
 async function enviarMensajeTexto(to, text) {
   const url = `https://graph.facebook.com/v23.0/${phoneNumberId}/messages`;
   const payload = {
@@ -89,7 +106,7 @@ async function enviarMensajeTexto(to, text) {
   }
 }
 
-// Determinar plantilla según mensaje recibido
+// --- Determinar plantilla según mensaje recibido ---
 function determinarPlantilla(mensaje) {
   if (!mensaje || typeof mensaje !== "string") return templates.MENSAJE_ERROR_LOTUS;
 
@@ -112,7 +129,7 @@ function determinarPlantilla(mensaje) {
   return templates.MENSAJE_ERROR_LOTUS;
 }
 
-// Extraer variables desde la base de datos según plantilla
+// --- Extraer variables desde DB ---
 async function extraerVariables(templateName, filtroUsuario) {
   const connection = await mysql.createConnection({
     host: "localhost",
@@ -170,6 +187,7 @@ async function extraerVariables(templateName, filtroUsuario) {
       break;
 
     case "confirmacion_reembolso_lotus":
+    case "INSTRUCCIONES_BLACK_LOTUS":
       valores = [filtroUsuario.codigo_pedido || ""];
       break;
 
@@ -182,55 +200,62 @@ async function extraerVariables(templateName, filtroUsuario) {
   return valores;
 }
 
-// ... (todo tu código anterior sin cambios hasta extraerVariables)
+// --- Manejo de estado por usuario ---
+const estadosUsuarios = {};
 
-// Procesar mensaje con variables desde DB (nueva versión con manejo de estado)
-const estadosUsuarios = {}; // estado temporal por usuario en memoria
-
+// --- Procesar mensaje con flujo de reembolso ---
 async function procesarMensaje(to, mensaje, filtroUsuario = { id_usuario: 1, codigo_pedido: null }) {
   if (!to) throw new Error("Número vacío");
 
   const usuarioId = filtroUsuario.id_usuario;
   estadosUsuarios[usuarioId] = estadosUsuarios[usuarioId] || {};
-
   const texto = mensaje.trim();
 
   // --- 1. Si el usuario está en flujo de reembolso y envía código de pedido ---
-  if (estadosUsuarios[usuarioId].esperandoReembolso && /^[A-Z]{3}\d{3,}$/i.test(texto)) {
-    filtroUsuario.codigo_pedido = texto.toUpperCase();
+if (estadosUsuarios[usuarioId].esperandoReembolso && /^[A-Z]{3}\d{3,}$/i.test(texto)) {
+  filtroUsuario.codigo_pedido = texto.toUpperCase();
 
-    // Plantilla de confirmación de reembolso
-    const plantilla = "confirmacion_reembolso_lotus";
-    const variables = await extraerVariables(plantilla, filtroUsuario);
-    await enviarPlantillaWhatsApp(to, plantilla, variables);
+  // 1️⃣ Plantilla de confirmación de reembolso
+  const plantillaConfirmacion = "confirmacion_reembolso_lotus";
+  const variablesConfirmacion = await extraerVariables(plantillaConfirmacion, filtroUsuario);
+  await enviarPlantillaWhatsApp(to, plantillaConfirmacion, variablesConfirmacion);
 
-    // Limpiar estado
-    estadosUsuarios[usuarioId].esperandoReembolso = false;
-    return;
-  }
+  // 2️⃣ Plantilla de instrucciones con imagen
+await enviarPlantillaWhatsApp(
+  to,
+  templates.INSTRUCCIONES_BLACK_LOTUS,
+  [], // sin variables de texto
+  "https://drive.google.com/uc?export=view&id=1nlHN_VRwiVlfg5GMX4J4tPZWoUa-L7R0" // URL de la imagen
+);
 
-  // --- 2. Si el mensaje contiene "reembolso" y no estaba esperando código ---
+
+  // Limpiar estado
+  estadosUsuarios[usuarioId].esperandoReembolso = false;
+  return;
+}
+
+
+  // 2️⃣ Si mensaje contiene "reembolso"
   if (texto.toLowerCase().includes("reembolso")) {
     estadosUsuarios[usuarioId].esperandoReembolso = true;
 
-    // Plantilla solicitando código de pedido
-    const plantilla = "solicitud_reembolso_lotus";
+    const plantilla = templates.SOLICITUD_REEMBOLSO_LOTUS;
     const variables = await extraerVariables(plantilla, filtroUsuario);
     await enviarPlantillaWhatsApp(to, plantilla, variables);
     return;
   }
 
-  // --- 3. Si el mensaje es un código de pedido normal ---
+  // 3️⃣ Si el mensaje es un código de pedido normal
   if (/^[A-Z]{3}\d{3,}$/i.test(texto)) {
     filtroUsuario.codigo_pedido = texto.toUpperCase();
 
-    const plantilla = "detalle_pedido_lotus";
+    const plantilla = templates.DETALLE_PEDIDO_LOTUS;
     const variables = await extraerVariables(plantilla, filtroUsuario);
     await enviarPlantillaWhatsApp(to, plantilla, variables);
     return;
   }
 
-  // --- 4. Plantillas normales según keywords ---
+  // 4️⃣ Plantillas normales según keywords
   const plantilla = determinarPlantilla(texto);
   const variables = await extraerVariables(plantilla, filtroUsuario);
   await enviarPlantillaWhatsApp(to, plantilla, variables);
