@@ -14,10 +14,10 @@ app.use(bodyParser.json());
 
 // Ruta raíz
 app.get("/", (req, res) => {
-  res.send("Servidor funcionando ✅");
+  res.send("Servidor funcionando");
 });
 
-// Webhook GET (verificación) y POST (mensajes)
+// Webhook GET  y POST
 app.route("/webhook")
   .get((req, res) => {
     const mode = req.query["hub.mode"];
@@ -25,7 +25,7 @@ app.route("/webhook")
     const challenge = req.query["hub.challenge"];
 
     if (mode && token && mode === "subscribe" && token === VERIFY_TOKEN) {
-      console.log("WEBHOOK VERIFICADO ✅");
+      console.log("WEBHOOK VERIFICADO");
       res.status(200).send(challenge);
     } else {
       res.sendStatus(403);
@@ -60,7 +60,7 @@ app.get("/test", async (req, res) => {
       ],
     };
     await handleIncomingMessage(testPayload);
-    res.send("Mensaje procesado y plantilla enviada ✅");
+    res.send("Mensaje procesado y plantilla enviada");
   } catch (err) {
     console.error(err);
     res.status(500).send("Error enviando mensaje");

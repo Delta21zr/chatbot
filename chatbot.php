@@ -27,7 +27,7 @@ $sql_contexto = "SELECT intencion_actual FROM contexto_chat WHERE usuario_id = $
 $result_contexto = $conexion->query($sql_contexto);
 $intencion_anterior = ($result_contexto && $result_contexto->num_rows > 0) ? $result_contexto->fetch_assoc()['intencion_actual'] : null;
 
-// Actualizar última interacción
+// Actualizar última interaccin
 if ($usuario) {
     actualizarUltimaInteraccion($usuario_id, $conexion);
 }
